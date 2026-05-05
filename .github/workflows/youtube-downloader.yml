@@ -53,7 +53,7 @@ jobs:
         with:
           name: youtube-video
           path: video/*.mp4
-          retention-days: 1   # حداقل یک روز، اما بعداً با API حذف می‌کنیم
+          retention-days: 1
 
       - name: Get artifact download URL
         id: artifact_url
