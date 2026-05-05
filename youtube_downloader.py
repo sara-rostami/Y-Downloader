@@ -36,7 +36,6 @@ def extract_api_config():
         return None
 
 def get_api_config(force_refresh=False):
-    """دریافت تنظیمات API با cache و fallback"""
     cache_file = Path(tempfile.gettempdir()) / "downloaderto_cache.json"
     if not force_refresh and cache_file.exists():
         try:
@@ -48,7 +47,6 @@ def get_api_config(force_refresh=False):
         except:
             pass
 
-    # تلاش برای استخراج خودکار
     config = extract_api_config()
     if config:
         config['timestamp'] = time.time()
@@ -59,14 +57,12 @@ def get_api_config(force_refresh=False):
             pass
         return config
 
-    # Fallback به مقادیر ثابت (آخرین test موفق)
     print("⚠️ استخراج خودکار ناموفق – استفاده از API پیش‌فرض.")
-    fallback_config = {
+    return {
         'api_key': 'e1f31df4f6424efab5eb606004289ced',
         'api_url': 'https://p.savenow.to/ajax/download.php',
         'timestamp': time.time()
     }
-    return fallback_config
 
 # ==================== دریافت لینک مستقیم دانلود ====================
 def get_download_url(api_key, api_url, youtube_url, quality='720'):
@@ -101,7 +97,6 @@ def get_download_url(api_key, api_url, youtube_url, quality='720'):
         raise Exception("progress_url یافت نشد")
 
     print(f"⏳ Polling روی {progress_url}")
-    # حداکثر ۶۰ ثانیه انتظار
     for attempt in range(1, 31):
         print(f"   تلاش {attempt}...")
         try:
@@ -128,7 +123,6 @@ def get_video_title(youtube_url):
                 f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
             ).json()
             title = oembed.get('title', f'video_{video_id}')
-            # پاکسازی کاراکترهای نامناسب برای نام فایل
             title = re.sub(r'[<>:"/\\|?*]', ' ', title)
             title = re.sub(r'\s+', ' ', title).strip()[:100]
             return title
@@ -138,6 +132,9 @@ def get_video_title(youtube_url):
 
 # ==================== دانلود فایل ====================
 def download_file(download_url, filename, output_dir="."):
+    # ایجاد پوشه‌ی خروجی در صورت عدم وجود
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Referer': 'https://downloaderto.com/',
@@ -166,30 +163,25 @@ def download_file(download_url, filename, output_dir="."):
 # ==================== روند اصلی ====================
 def download_youtube_video(youtube_url, quality="720p", output_dir="."):
     print(f"🎬 شروع دانلود: {youtube_url}")
-    # 1. تنظیمات API (با fallback)
+
     config = get_api_config()
     api_key = config['api_key']
     api_url = config['api_url']
 
-    # 2. عنوان ویدیو
     title = get_video_title(youtube_url)
     safe_title = re.sub(r'[^\w\-_\. ]', '', title).replace(' ', '_')
     filename = f"{safe_title}_{quality}.mp4"
 
-    # 3. دریافت لینک مستقیم
     download_url = get_download_url(api_key, api_url, youtube_url, quality)
 
-    # 4. دانلود فایل
     file_path = download_file(download_url, filename, output_dir)
     return file_path
 
 # ==================== ورودی برنامه ====================
 if __name__ == "__main__":
-    # خواندن لینک از environment variable (مناسب GitHub Actions) یا آرگومان
     url = os.environ.get("YOUTUBE_URL") or (sys.argv[1] if len(sys.argv) > 1 else None)
     if not url:
         print("❌ لینک یوتیوب مشخص نشده است.")
-        print("میتوانید از متغیر محیطی YOUTUBE_URL یا آرگومان خط فرمان استفاده کنید.")
         sys.exit(1)
 
     quality = os.environ.get("QUALITY", "720p")
@@ -198,7 +190,6 @@ if __name__ == "__main__":
     try:
         file_path = download_youtube_video(url, quality, output_dir)
         print(f"🎉 فایل نهایی: {file_path}")
-        # خروجی مسیر فایل برای استفاده در مراحل بعدی GitHub Actions
         if os.environ.get("GITHUB_OUTPUT"):
             with open(os.environ["GITHUB_OUTPUT"], "a") as f:
                 f.write(f"downloaded_file={file_path}\n")
