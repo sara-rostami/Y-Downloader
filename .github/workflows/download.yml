@@ -1,4 +1,4 @@
-name: دانلود ویدیو یوتیوب
+name: دانلود ویدیو یوتیوب (مستقیم در مخزن)
 
 on:
   workflow_dispatch:
@@ -12,22 +12,36 @@ on:
         required: true
 
 jobs:
-  download:
+  download-and-commit:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # اجازه نوشتن در مخزن
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: دریافت کد از مخزن
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: نصب پایتون
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
       - name: نصب کتابخانه‌ها
         run: pip install requests
+
       - name: دانلود ویدیو
         env:
           YOUTUBE_URL: ${{ github.event.inputs.url }}
           QUALITY: ${{ github.event.inputs.quality }}
+          OUTPUT_DIR: ${{ github.workspace }}/downloads
         run: python youtube_downloader.py
-      - name: آپلود فایل دانلود شده
-        uses: actions/upload-artifact@v4
-        with:
-          name: video
-          path: ./*.mp4
+
+      - name: Commit و Push فایل به مخزن
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add downloads/*.mp4 || echo "فایلی اضافه نشد"
+          git commit -m "اضافه شدن ویدیوی جدید" || echo "چیزی برای commit نیست"
+          git push || echo "push ناموفق"
