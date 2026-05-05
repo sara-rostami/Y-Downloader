@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       youtube_url:
-        description: '🔗 لینک یوتیوب'
+        description: '🔗 لینک YouTube یا لینک downloaderto (مثال: https://downloaderto.com/download/...)'
         required: true
         type: string
       quality:
-        description: '📊 کیفیت'
+        description: '📊 کیفیت (فقط برای لینک یوتیوب)'
         required: false
         default: '720p'
         type: choice
@@ -52,7 +52,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: youtube-video
-          path: video/*.mp4
+          path: video/*
           retention-days: 1
 
       - name: Get artifact download URL
@@ -65,7 +65,6 @@ jobs:
           echo "download_url=${DOWNLOAD_URL}" >> $GITHUB_OUTPUT
           echo "=========================================="
           echo "🎬 عنوان: ${{ steps.downloader.outputs.video_title }}"
-          echo "💾 کیفیت: ${{ github.event.inputs.quality }}"
           echo "🔗 لینک دانلود (تا زمان حذف معتبر است):"
           echo "${DOWNLOAD_URL}"
           echo "⏳ حذف خودکار بعد از ${{ github.event.inputs.retention_minutes }} دقیقه"
