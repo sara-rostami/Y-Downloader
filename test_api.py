@@ -1,56 +1,43 @@
-import requests, re, tempfile, time, json, sys  # sys اضافه شد
+import requests, re, tempfile, time, json, sys
 from pathlib import Path
 
-# ====================== ۱. استخراج از صفحه اصلی ======================
+# ====================== ۱. استخراج از صفحه اصلی + فایل‌های JS ======================
 def extract_from_main_page():
     print("=" * 60)
-    print("مرحله ۱-الف: استخراج از صفحه اصلی downloaderto.com")
+    print("مرحله ۱: استخراج API از سایت downloaderto.com")
     print("=" * 60)
     try:
         site_url = "https://downloaderto.com/enHF/"
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                   'Accept': 'text/html,application/xhtml+xml'}
         resp = requests.get(site_url, headers=headers, timeout=15)
         if resp.status_code != 200:
             print(f"❌ دریافت صفحه اصلی شکست خورد: {resp.status_code}")
             return None, None
         html = resp.text
 
-        # ذخیره HTML برای بررسی
+        # ذخیره HTML
         debug_file = Path("/tmp/downloaderto_main.html")
         debug_file.write_text(html, encoding='utf-8')
-        print(f"📄 صفحه اصلی در {debug_file} ذخیره شد")
+        print(f"📄 صفحه اصلی ذخیره شد: {debug_file}")
 
-        # جستجوی API Key
+        # جستجوی API Key در خود HTML
         api_key = None
         patterns_key = [
             r'api["\']?\s*[:=]\s*["\']([a-f0-9]{32})["\']',
             r'apiKey["\']?\s*[:=]\s*["\']([a-f0-9]{32})["\']',
             r'key["\']?\s*[:=]\s*["\']([a-f0-9]{32})["\']',
-            r'["\']([a-f0-9]{32})["\']',  # عمومی
+            r'["\']([a-f0-9]{32})["\']',
         ]
         for pat in patterns_key:
             matches = re.findall(pat, html, re.IGNORECASE)
             for m in matches:
                 if len(m) == 32 and all(c in '0123456789abcdef' for c in m):
                     api_key = m
-                    print(f"✅ API Key پیدا شد: {api_key}")
+                    print(f"✅ API Key در HTML اصلی: {api_key}")
                     break
             if api_key:
                 break
-        if not api_key:
-            print("❌ API Key در HTML اصلی پیدا نشد")
-            # چاپ چند اسکریپت که ممکن است کلید را پنهان کرده باشند
-            scripts = re.findall(r'<script[^>]*>(.*?)</script>', html, re.DOTALL | re.IGNORECASE)
-            interesting_scripts = []
-            for s in scripts:
-                if 'api' in s.lower() or 'key' in s.lower() or len(s) > 200:
-                    interesting_scripts.append(s[:300])
-            if interesting_scripts:
-                print("\n🔎 بخش‌هایی از اسکریپت‌های مرتبط:")
-                for i, sc in enumerate(interesting_scripts[:3]):
-                    print(f"--- اسکریپت {i+1} ---")
-                    print(sc)
-                    print("-------------------")
 
         # جستجوی API URL
         api_url = None
@@ -64,60 +51,80 @@ def extract_from_main_page():
             for m in matches:
                 if 'download' in m.lower() and m.startswith('http'):
                     api_url = m
-                    print(f"✅ API URL پیدا شد: {api_url}")
+                    print(f"✅ API URL در HTML اصلی: {api_url}")
                     break
             if api_url:
                 break
-        if not api_url:
-            print("❌ API URL در HTML اصلی پیدا نشد")
+
+        # اگر کلید یا URL پیدا نشد، فایل‌های JS خارجی را بررسی کن
+        if not api_key or not api_url:
+            print("\n🔍 جستجو در فایل‌های JavaScript خارجی...")
+            js_files = re.findall(r'<script[^>]*src=["\']([^"\']+\.js[^"\']*)["\']', html)
+            # حذف تکراری‌ها و محدود به ۱۰ فایل اول
+            js_files = list(dict.fromkeys(js_files))[:10]
+            print(f"   {len(js_files)} فایل JS پیدا شد.")
+
+            for js_file in js_files:
+                # ساخت URL کامل
+                if js_file.startswith('http'):
+                    js_url = js_file
+                elif js_file.startswith('/'):
+                    js_url = f"https://downloaderto.com{js_file}"
+                else:
+                    js_url = f"https://downloaderto.com/{js_file}"
+
+                try:
+                    print(f"   دریافت: {js_url[:80]}...")
+                    js_resp = requests.get(js_url, headers=headers, timeout=10)
+                    if js_resp.status_code == 200:
+                        js_content = js_resp.text
+
+                        # جستجوی کلید در فایل JS
+                        if not api_key:
+                            for pat in patterns_key:
+                                matches = re.findall(pat, js_content, re.IGNORECASE)
+                                for m in matches:
+                                    if len(m) == 32 and all(c in '0123456789abcdef' for c in m):
+                                        api_key = m
+                                        print(f"   ✅ API Key در JS پیدا شد: {api_key}")
+                                        break
+                                if api_key:
+                                    break
+
+                        # جستجوی URL در فایل JS
+                        if not api_url:
+                            for pat in patterns_url:
+                                matches = re.findall(pat, js_content, re.IGNORECASE)
+                                for m in matches:
+                                    if 'download' in m.lower() and m.startswith('http'):
+                                        api_url = m
+                                        print(f"   ✅ API URL در JS پیدا شد: {api_url}")
+                                        break
+                                if api_url:
+                                    break
+
+                        if api_key and api_url:
+                            break
+                except Exception as e:
+                    print(f"   ⚠️ خطا در دریافت {js_url[:50]}: {e}")
+
+        # خلاصه
+        if api_key:
+            print(f"\n✅ API Key نهایی: {api_key}")
+        else:
+            print("\n❌ API Key پیدا نشد")
+        if api_url:
+            print(f"✅ API URL نهایی: {api_url}")
+        else:
+            print("❌ API URL پیدا نشد")
 
         return api_key, api_url
+
     except Exception as e:
-        print(f"❌ خطا: {e}")
+        print(f"❌ خطای کلی: {e}")
         return None, None
 
-# ====================== ۲. تلاش برای دریافت کلید از endpoint‌های اختصاصی ======================
-def try_get_api_key_from_endpoints():
-    print("\n" + "=" * 60)
-    print("مرحله ۱-ب: جستجوی کلید در endpoint‌های احتمالی")
-    print("=" * 60)
-    candidates = [
-        "https://downloaderto.com/api/key",
-        "https://downloaderto.com/ajax/key.php",
-        "https://p.savenow.to/api/key",
-        "https://p.savenow.to/ajax/key.php",
-        "https://downloaderto.com/enHF/api/key",
-    ]
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-    for url in candidates:
-        try:
-            r = requests.get(url, headers=headers, timeout=10)
-            if r.status_code == 200:
-                content_type = r.headers.get('content-type', '')
-                print(f"🔍 بررسی {url} -> status={r.status_code}, content-type={content_type}")
-                if 'json' in content_type:
-                    data = r.json()
-                    print(f"   📦 پاسخ جیسون: {json.dumps(data)[:200]}")
-                    for key_name in ['api_key', 'key', 'apikey', 'token']:
-                        if key_name in data:
-                            print(f"   ✅ کلید با نام '{key_name}' پیدا شد: {data[key_name]}")
-                            return data[key_name]
-                else:
-                    text = r.text
-                    print(f"   📄 پاسخ متنی (200 کاراکتر اول): {text[:200]}")
-                    m = re.search(r'["\']?([a-f0-9]{32})["\']?', text)
-                    if m and len(m.group(1)) == 32:
-                        key = m.group(1)
-                        print(f"   ✅ کلید ۳۲ کاراکتری هگز پیدا شد: {key}")
-                        return key
-            else:
-                print(f"   {url} -> status {r.status_code}")
-        except Exception as e:
-            print(f"   ❌ خطا در {url}: {e}")
-    print("❌ هیچ کلیدی از endpoint‌ها دریافت نشد")
-    return None
-
-# ====================== ۳. درخواست به API دانلود ======================
+# ====================== ۲. درخواست به API دانلود ======================
 def test_api_request(api_key, api_url):
     print("\n" + "=" * 60)
     print("مرحله ۲: درخواست آزمایشی به API")
@@ -154,7 +161,7 @@ def test_api_request(api_key, api_url):
         print(f"❌ Exception: {e}")
         return None
 
-# ====================== ۴. Polling لینک نهایی ======================
+# ====================== ۳. Polling لینک نهایی ======================
 def test_polling(download_id):
     print("\n" + "=" * 60)
     print("مرحله ۳: آزمایش Polling لینک دانلود")
@@ -191,24 +198,21 @@ def test_polling(download_id):
 
 # ====================== اجرای اصلی ======================
 if __name__ == "__main__":
-    # مرحله ۱: استخراج از صفحه اصلی
+    # مرحله ۱: استخراج کامل (HTML + JS)
     api_key, api_url = extract_from_main_page()
 
-    # اگر کلید پیدا نشد، endpoint‌ها را بگرد
-    if not api_key:
-        api_key = try_get_api_key_from_endpoints()
-
-    # اگر همچنان کلید نیست، پیام نهایی و خروج
-    if not api_key:
-        print("\n⚠️ کلید API پیدا نشد. ادامه ممکن نیست. فایل HTML ذخیره شده را از Artifacts دانلود کنید و بررسی دستی نمایید.")
-        sys.exit(1)
-
-    # اگر api_url نیست، از آدرس پیدا شده قبلی استفاده کن
+    # اگر api_url نداریم، از URL پیدا شده قبلی (پیش‌فرض امن) استفاده کن
     if not api_url:
         api_url = "https://p.savenow.to/ajax/download.php"
         print(f"⚠️ از API URL پیش‌فرض استفاده می‌شود: {api_url}")
 
-    # مرحله ۲: درخواست به API
+    # اگر کلید پیدا نشد، نمی‌توان ادامه داد
+    if not api_key:
+        print("\n⚠️ کلید API پیدا نشد. ادامه ممکن نیست.")
+        print("لطفاً فایل HTML ذخیره شده را از Artifacts دانلود کنید و بررسی دستی نمایید.")
+        sys.exit(1)
+
+    # مرحله ۲: درخواست API
     download_id = test_api_request(api_key, api_url)
 
     # مرحله ۳: polling
