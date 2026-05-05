@@ -1,69 +1,117 @@
-import requests, re, time, base64, json, sys
+import requests
+import re
+import time
+import base64
+import json
+import sys
 from pathlib import Path
 
-# ====================== استخراج API ======================
+# ====================== استخراج API از سایت ======================
 def extract_api_config():
-    print("="*60)
-    print("مرحله ۱: استخراج API از سایت")
-    print("="*60)
+    print("=" * 60)
+    print("مرحله ۱: استخراج API از سایت downloaderto.com")
+    print("=" * 60)
     try:
-        url = "https://downloaderto.com/enHF/"
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        resp = requests.get(url, headers=headers, timeout=15)
+        site_url = "https://downloaderto.com/enHF/"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'text/html,application/xhtml+xml'
+        }
+        resp = requests.get(site_url, headers=headers, timeout=15)
         if resp.status_code != 200:
-            print(f"❌ status {resp.status_code}")
+            print(f"❌ دریافت صفحه اصلی شکست خورد: {resp.status_code}")
             return None, None
         html = resp.text
 
-        api_key = re.search(r'["\']([a-f0-9]{32})["\']', html)
-        api_key = api_key.group(1) if api_key else None
-        api_url = re.search(r'(https?://[a-z0-9\.-]+/ajax/download\.php)', html)
-        api_url = api_url.group(1) if api_url else None
+        # ذخیره HTML برای بررسی دستی (اختیاری)
+        debug_file = Path("/tmp/downloaderto_main.html")
+        debug_file.write_text(html, encoding='utf-8')
+        print(f"📄 صفحه اصلی ذخیره شد: {debug_file}")
 
-        print(f"API Key: {api_key}")
-        print(f"API URL: {api_url}")
+        # جستجوی API Key
+        api_key = None
+        patterns_key = [
+            r'api["\']?\s*[:=]\s*["\']([a-f0-9]{32})["\']',
+            r'apiKey["\']?\s*[:=]\s*["\']([a-f0-9]{32})["\']',
+            r'key["\']?\s*[:=]\s*["\']([a-f0-9]{32})["\']',
+            r'["\']([a-f0-9]{32})["\']',  # عمومی
+        ]
+        for pat in patterns_key:
+            matches = re.findall(pat, html, re.IGNORECASE)
+            for m in matches:
+                if len(m) == 32 and all(c in '0123456789abcdef' for c in m):
+                    api_key = m
+                    print(f"✅ API Key پیدا شد: {api_key}")
+                    break
+            if api_key:
+                break
+        if not api_key:
+            print("❌ API Key در HTML اصلی پیدا نشد")
+
+        # جستجوی API URL
+        api_url = None
+        patterns_url = [
+            r'(https?://[a-z0-9\.-]+/ajax/download\.php)',
+            r'(https?://[a-z0-9\.-]+/api/download\.php)',
+            r'apiUrl["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+        ]
+        for pat in patterns_url:
+            matches = re.findall(pat, html, re.IGNORECASE)
+            for m in matches:
+                if 'download' in m.lower() and m.startswith('http'):
+                    api_url = m
+                    print(f"✅ API URL پیدا شد: {api_url}")
+                    break
+            if api_url:
+                break
+        if not api_url:
+            print("❌ API URL در HTML اصلی پیدا نشد")
+
         return api_key, api_url
+
     except Exception as e:
-        print(f"❌ {e}")
+        print(f"❌ خطای کلی: {e}")
         return None, None
 
 # ====================== درخواست API و استخراج لینک ======================
-def get_download_info(api_key, api_url):
-    print("\n"+"="*60)
+def fetch_and_decode(api_key, api_url):
+    print("\n" + "=" * 60)
     print("مرحله ۲: درخواست به API و تحلیل پاسخ")
-    print("="*60)
+    print("=" * 60)
     if not api_key or not api_url:
         return None
 
+    youtube_url = "https://www.youtube.com/watch?v=jNQXAC9IVRw"  # ویدیو تست
     params = {
         'copyright': '0',
         'format': '360',
-        'url': 'https://www.youtube.com/watch?v=jNQXAC9IVRw',
+        'url': youtube_url,
         'api': api_key
     }
     headers = {
-        'User-Agent': 'Mozilla/5.0',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
         'Referer': 'https://downloaderto.com/'
     }
     try:
         r = requests.get(api_url, params=params, headers=headers, timeout=30)
+        print(f"Status: {r.status_code}")
+        print("Response (first 500 chars):", r.text[:500])
         data = r.json()
         print("JSON keys:", list(data.keys()))
         if data.get('success'):
             download_id = data.get('id')
             content_b64 = data.get('content', '')
-            print(f"Download ID: {download_id}")
-            print(f"Content (first 100 chars): {content_b64[:100]}...")
+            print(f"✅ Download ID: {download_id}")
+            print(f"Content base64 (first 80 chars): {content_b64[:80]}...")
 
-            # کدگشایی base64
+            # دیکد base64
             try:
                 decoded_bytes = base64.b64decode(content_b64)
                 decoded_html = decoded_bytes.decode('utf-8', errors='ignore')
-                print("\n✅ محتوای دیکد شده (اول ۲۰۰۰ کاراکتر):")
+                print("\n✅ محتوای دیکد شده (۲۰۰۰ کاراکتر اول):")
                 print(decoded_html[:2000])
 
-                # جستجوی لینک های mp4 یا لینک دانلود
-                # الگوهای مختلف
+                # الگوهای مختلف برای یافتن لینک mp4 یا لینک دانلود
                 patterns = [
                     r'href=["\'](https?://[^"\']+\.mp4[^"\']*)',
                     r'(https?://[^"\']+/download/[^"\']+)',
@@ -71,6 +119,7 @@ def get_download_info(api_key, api_url):
                     r'(https?://[^"\']+\.mp4[^"\']*)',
                     r'data-url=["\']([^"\']+)["\']',
                     r'download-url=["\']([^"\']+)["\']',
+                    r'(https?://[^"\']+/dl/[^"\']+)',
                 ]
                 found_links = []
                 for pat in patterns:
@@ -78,88 +127,100 @@ def get_download_info(api_key, api_url):
                     for link in matches:
                         if link not in found_links:
                             found_links.append(link)
-                            print(f"🔗 لینک احتمالی پیدا شد: {link}")
+                            print(f"🔗 لینک احتمالی: {link}")
 
                 if found_links:
-                    # برمی‌گردانیم اولین لینک mp4 یا اولین لینک
+                    # اولویت با mp4
                     mp4_links = [l for l in found_links if '.mp4' in l.lower()]
-                    return mp4_links[0] if mp4_links else found_links[0]
+                    final_link = mp4_links[0] if mp4_links else found_links[0]
+                    print(f"\n🎯 لینک انتخاب شده: {final_link}")
+                    return final_link
                 else:
-                    print("⚠️ هیچ لینک دانلودی در content پیدا نشد")
-                    # شاید content فقط کارت نمایش باشد و لینک با یک درخواست دیگر بیاید
-                    # پس به عنوان fallback، ID را برمی‌گردانیم و بعداً تست می‌کنیم
+                    print("\n⚠️ هیچ لینکی در content پیدا نشد.")
+                    # برگرداندن ID + content برای بررسی بیشتر
                     return {'id': download_id, 'content': decoded_html}
 
             except Exception as e:
                 print(f"❌ خطا در دیکد base64: {e}")
                 return {'id': download_id}
         else:
-            print("❌ API success=false:", data.get('error'))
+            print("❌ API شکست:", data.get('error'))
             return None
     except Exception as e:
-        print(f"❌ {e}")
+        print(f"❌ Exception: {e}")
         return None
 
-# ====================== تست لینک ======================
+# ====================== تست لینک مستقیم ======================
 def test_direct_link(link):
-    if isinstance(link, dict):  # هنوز لینک کامل نداریم
-        print("\n❌ لینک مستقیم یافت نشد. اطلاعات:", link)
-        # اینجا می‌توانیم endpointهای جدید را تست کنیم
-        return
-
-    print("\n"+"="*60)
-    print("مرحله ۳: تست لینک دانلود مستقیم")
-    print("="*60)
-    try:
-        headers = {'User-Agent': 'Mozilla/5.0', 'Referer': 'https://downloaderto.com/'}
-        r = requests.head(link, headers=headers, timeout=10, allow_redirects=True)
-        size = r.headers.get('content-length', '0')
-        final_url = r.url
-        print(f"Status: {r.status_code}, Size: {size}")
-        if r.status_code in [200, 302] and int(size) > 100000:
-            print(f"✅ لینک فعال: {final_url}")
-            return final_url
-        else:
-            print("⚠️ لینک معتبر نیست یا حجم کم است")
+    if isinstance(link, dict):
+        # لینک پیدا نشد، از ID استفاده می‌کنیم
+        download_id = link.get('id')
+        if not download_id:
+            print("❌ شناسه دانلود هم موجود نیست.")
             return None
-    except Exception as e:
-        print(f"❌ {e}")
+        print(f"\n🔄 لینک در content نبود، آزمایش مسیرهای جایگزین با ID {download_id}...")
+        alternative_urls = [
+            f"https://p.savenow.to/dl/{download_id}",
+            f"https://p.savenow.to/file/{download_id}",
+            f"https://downloaderto.com/download/{download_id}",
+            f"https://downloaderto.com/dl/{download_id}",
+            f"https://downloaderto.com/file/{download_id}",
+            f"https://p.lbserver.xyz/dl/{download_id}",
+            f"https://p.lbserver.xyz/file/{download_id}",
+        ]
+        headers = {
+            'User-Agent': 'Mozilla/5.0',
+            'Referer': 'https://downloaderto.com/'
+        }
+        for alt_url in alternative_urls:
+            try:
+                resp = requests.head(alt_url, headers=headers, timeout=8, allow_redirects=True)
+                size = resp.headers.get('content-length', '0')
+                if resp.status_code in [200, 302] and int(size) > 500000:
+                    print(f"✅ لینک فعال پیدا شد: {alt_url} (size={size})")
+                    return alt_url
+                else:
+                    print(f"   {alt_url} -> {resp.status_code}, size={size}")
+            except Exception as e:
+                print(f"   {alt_url} -> خطا: {e}")
         return None
+    else:
+        # لینک مستقیم از content
+        print("\n" + "=" * 60)
+        print("مرحله ۳: تست لینک دانلود مستقیم")
+        print("=" * 60)
+        try:
+            headers = {'User-Agent': 'Mozilla/5.0', 'Referer': 'https://downloaderto.com/'}
+            r = requests.head(link, headers=headers, timeout=10, allow_redirects=True)
+            size = r.headers.get('content-length', '0')
+            final_url = r.url
+            print(f"Status: {r.status_code}, Size: {size}")
+            if r.status_code in [200, 302] and int(size) > 100000:
+                print(f"✅ لینک فعال: {final_url}")
+                return final_url
+            else:
+                print("⚠️ لینک قابل استفاده نیست یا حجم کم است.")
+                return None
+        except Exception as e:
+            print(f"❌ {e}")
+            return None
 
-# ====================== اجرا ======================
+# ====================== اجرای اصلی ======================
 if __name__ == "__main__":
     api_key, api_url = extract_api_config()
     if not api_key or not api_url:
+        print("❌ استخراج API ناموفق. پایان.")
         sys.exit(1)
 
-    result = get_download_info(api_key, api_url)
-    if result:
-        if isinstance(result, str):
-            # لینک مستقیم
-            direct = test_direct_link(result)
-            if direct:
-                print(f"\n🎉 موفقیت! لینک دانلود: {direct}")
-            else:
-                print("\n⚠️ لینک پیدا شده در content قابل دانلود نبود.")
-        else:
-            # لینک پیدا نشد، دوباره polling را با ID امتحان می‌کنیم اما با تاخیر بیشتر و endpoint جدید
-            download_id = result.get('id')
-            if download_id:
-                print(f"\n🔄 تلاش دوباره برای polling با ID {download_id}")
-                # ممکن است لینک در آدرس دیگری ساخته شود
-                test_urls = [
-                    f"https://p.savenow.to/dl/{download_id}",
-                    f"https://downloaderto.com/download/{download_id}",
-                    f"https://downloaderto.com/file/{download_id}",
-                    f"https://p.savenow.to/file/{download_id}",
-                ]
-                for url in test_urls:
-                    try:
-                        r = requests.head(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=8)
-                        if r.status_code == 200:
-                            print(f"✅ {url} در دسترس است")
-                    except:
-                        pass
+    result = fetch_and_decode(api_key, api_url)
+    if not result:
+        print("❌ دریافت اطلاعات از API ناموفق.")
+        sys.exit(1)
+
+    final_link = test_direct_link(result)
+    if final_link:
+        print(f"\n🎉 لینک نهایی دانلود: {final_link}")
     else:
-        print("❌ دریافت اطلاعات دانلود ناموفق.")
-    print("\n🏁 پایان")
+        print("\n⚠️ نتوانستیم لینک مستقیم پیدا کنیم. شاید نیاز به بررسی بیشتر باشد.")
+
+    print("\n🏁 پایان تست")
