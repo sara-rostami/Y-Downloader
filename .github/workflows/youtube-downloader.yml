@@ -19,7 +19,7 @@ on:
           - 1080p
           - best
       retention_minutes:
-        description: 'چند دقیقه فایل روی GitHub بماند؟ (حداقل 1)'
+        description: 'چند دقیقه فایل بماند؟ (حداقل 1)'
         required: false
         default: '30'
         type: string
@@ -53,7 +53,7 @@ jobs:
           path: video/*.mp4
           retention-days: 1
 
-      - name: Get artifact download URL
+      - name: Display download link
         id: artifact_url
         run: |
           ARTIFACT_ID="${{ steps.upload.outputs.artifact-id }}"
@@ -64,19 +64,20 @@ jobs:
           echo "=========================================="
           echo "🎬 عنوان: ${{ steps.downloader.outputs.video_title }}"
           echo "💾 کیفیت: ${{ github.event.inputs.quality }}"
-          echo "🔗 لینک دانلود (معتبر تا حذف):"
+          echo "🔗 لینک دانلود (تا زمان حذف معتبر است):"
           echo "${DOWNLOAD_URL}"
-          echo "⏳ خودکار حذف بعد از ${{ github.event.inputs.retention_minutes }} دقیقه"
+          echo "⏳ حذف خودکار بعد از ${{ github.event.inputs.retention_minutes }} دقیقه"
           echo "=========================================="
 
       - name: Auto-delete after retention period
-        if: always()
+        if: always() && steps.upload.outputs.artifact-id != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
           RETENTION_MINUTES: ${{ github.event.inputs.retention_minutes }}
           REPO: ${{ github.repository }}
         run: |
+          echo "⏳ منتظر ${RETENTION_MINUTES} دقیقه..."
           sleep $(( ${RETENTION_MINUTES} * 60 ))
           echo "⏰ حذف خودکار artifact..."
           curl -L -X DELETE \
@@ -84,5 +85,4 @@ jobs:
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             "https://api.github.com/repos/${REPO}/actions/artifacts/${ARTIFACT_ID}" \
-            || echo "⚠️ حذف نشد (ممکن است قبلاً منقضی شده باشد)"
-          echo "✅ لینک دانلود غیرفعال شد."
+            && echo "✅ حذف شد." || echo "⚠️ خطا در حذف (ممکن است قبلاً حذف شده باشد)"
