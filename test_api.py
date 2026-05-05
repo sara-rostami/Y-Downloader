@@ -1,7 +1,7 @@
-import requests, re, tempfile, time, json
+import requests, re, tempfile, time, json, sys  # sys اضافه شد
 from pathlib import Path
 
-# ====================== ۱. استخراج API از صفحه اصلی ======================
+# ====================== ۱. استخراج از صفحه اصلی ======================
 def extract_from_main_page():
     print("=" * 60)
     print("مرحله ۱-الف: استخراج از صفحه اصلی downloaderto.com")
@@ -39,6 +39,18 @@ def extract_from_main_page():
                 break
         if not api_key:
             print("❌ API Key در HTML اصلی پیدا نشد")
+            # چاپ چند اسکریپت که ممکن است کلید را پنهان کرده باشند
+            scripts = re.findall(r'<script[^>]*>(.*?)</script>', html, re.DOTALL | re.IGNORECASE)
+            interesting_scripts = []
+            for s in scripts:
+                if 'api' in s.lower() or 'key' in s.lower() or len(s) > 200:
+                    interesting_scripts.append(s[:300])
+            if interesting_scripts:
+                print("\n🔎 بخش‌هایی از اسکریپت‌های مرتبط:")
+                for i, sc in enumerate(interesting_scripts[:3]):
+                    print(f"--- اسکریپت {i+1} ---")
+                    print(sc)
+                    print("-------------------")
 
         # جستجوی API URL
         api_url = None
@@ -83,17 +95,14 @@ def try_get_api_key_from_endpoints():
             if r.status_code == 200:
                 content_type = r.headers.get('content-type', '')
                 print(f"🔍 بررسی {url} -> status={r.status_code}, content-type={content_type}")
-                # اگر جیسون باشد
                 if 'json' in content_type:
                     data = r.json()
                     print(f"   📦 پاسخ جیسون: {json.dumps(data)[:200]}")
-                    # کلیدهای ممکن
                     for key_name in ['api_key', 'key', 'apikey', 'token']:
                         if key_name in data:
                             print(f"   ✅ کلید با نام '{key_name}' پیدا شد: {data[key_name]}")
                             return data[key_name]
                 else:
-                    # شاید کلید داخل متن باشد
                     text = r.text
                     print(f"   📄 پاسخ متنی (200 کاراکتر اول): {text[:200]}")
                     m = re.search(r'["\']?([a-f0-9]{32})["\']?', text)
@@ -101,6 +110,8 @@ def try_get_api_key_from_endpoints():
                         key = m.group(1)
                         print(f"   ✅ کلید ۳۲ کاراکتری هگز پیدا شد: {key}")
                         return key
+            else:
+                print(f"   {url} -> status {r.status_code}")
         except Exception as e:
             print(f"   ❌ خطا در {url}: {e}")
     print("❌ هیچ کلیدی از endpoint‌ها دریافت نشد")
@@ -187,14 +198,12 @@ if __name__ == "__main__":
     if not api_key:
         api_key = try_get_api_key_from_endpoints()
 
-    # اگر همچنان کلید نیست، از آدرس موجود استفاده کن (کد قبلی ما)
+    # اگر همچنان کلید نیست، پیام نهایی و خروج
     if not api_key:
-        print("\n⚠️ کلید پیدا نشد. نمی‌توان ادامه داد.")
-        # اما شاید بشود با ارسال درخواست بدون کلید؟ (احتمالش کم است)
-        # فعلاً متوقف می‌شویم
+        print("\n⚠️ کلید API پیدا نشد. ادامه ممکن نیست. فایل HTML ذخیره شده را از Artifacts دانلود کنید و بررسی دستی نمایید.")
         sys.exit(1)
 
-    # اگر api_url نیست، از آدرس پیدا شده قبلی استفاده کن (یا پیش‌فرض)
+    # اگر api_url نیست، از آدرس پیدا شده قبلی استفاده کن
     if not api_url:
         api_url = "https://p.savenow.to/ajax/download.php"
         print(f"⚠️ از API URL پیش‌فرض استفاده می‌شود: {api_url}")
