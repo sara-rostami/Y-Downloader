@@ -157,7 +157,7 @@ def sanitize_title(title):
 # ------------------------------------------------------------
 # Polling با پشتیبانی از چندین لینک
 # ------------------------------------------------------------
-def wait_for_download_link(download_id, max_attempts=40, wait_time=3):
+def wait_for_download_link(download_id, max_attempts=5, wait_time=30):
     possible_urls = [
         f"https://p.savenow.to/download/{download_id}",
         f"https://p.savenow.to/api/download/{download_id}",
