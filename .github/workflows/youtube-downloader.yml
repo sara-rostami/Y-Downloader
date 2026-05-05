@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       youtube_url:
-        description: '🔗 لینک YouTube یا لینک downloaderto (مثال: https://downloaderto.com/download/...)'
+        description: '🔗 لینک یوتیوب یا لینک مستقیم downloaderto'
         required: true
         type: string
       quality:
-        description: '📊 کیفیت (فقط برای لینک یوتیوب)'
+        description: '📊 کیفیت (فقط برای یوتیوب)'
         required: false
         default: '720p'
         type: choice
@@ -19,7 +19,7 @@ on:
           - 1080p
           - بهترین
       retention_minutes:
-        description: '⏱️ چند دقیقه فایل روی گیت‌هاب بماند؟ (حداقل 1)'
+        description: '⏱️ چند دقیقه فایل روی گیت‌هاب بماند؟'
         required: false
         default: '30'
         type: string
@@ -47,7 +47,7 @@ jobs:
             --quality "${{ github.event.inputs.quality }}" \
             --output-dir ./video
 
-      - name: Upload video as artifact
+      - name: Upload artifact
         id: upload
         uses: actions/upload-artifact@v4
         with:
@@ -55,7 +55,7 @@ jobs:
           path: video/*
           retention-days: 1
 
-      - name: Get artifact download URL
+      - name: Display download link
         id: artifact_url
         run: |
           ARTIFACT_ID="${{ steps.upload.outputs.artifact-id }}"
@@ -78,12 +78,10 @@ jobs:
           RETENTION_MINUTES: ${{ github.event.inputs.retention_minutes }}
           REPO: ${{ github.repository }}
         run: |
-          echo "⏳ منتظر ${RETENTION_MINUTES} دقیقه..."
           sleep $(( ${RETENTION_MINUTES} * 60 ))
-          echo "⏰ حذف خودکار artifact..."
           curl -L -X DELETE \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
             "https://api.github.com/repos/${REPO}/actions/artifacts/${ARTIFACT_ID}" \
-            && echo "✅ حذف شد." || echo "⚠️ خطا در حذف (ممکن است قبلاً حذف شده باشد)"
+            && echo "✅ حذف شد." || echo "⚠️ خطا در حذف"
