@@ -1,0 +1,33 @@
+name: دانلود ویدیو یوتیوب
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'لینک ویدیو یوتیوب'
+        required: true
+      quality:
+        description: 'کیفیت (360p, 480p, 720p, 1080p, best)'
+        default: '720p'
+        required: true
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: نصب کتابخانه‌ها
+        run: pip install requests
+      - name: دانلود ویدیو
+        env:
+          YOUTUBE_URL: ${{ github.event.inputs.url }}
+          QUALITY: ${{ github.event.inputs.quality }}
+        run: python youtube_downloader.py
+      - name: آپلود فایل دانلود شده
+        uses: actions/upload-artifact@v4
+        with:
+          name: video
+          path: ./*.mp4
