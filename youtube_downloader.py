@@ -36,6 +36,7 @@ def extract_api_config():
         return None
 
 def get_api_config(force_refresh=False):
+    """دریافت تنظیمات API با cache و fallback"""
     cache_file = Path(tempfile.gettempdir()) / "downloaderto_cache.json"
     if not force_refresh and cache_file.exists():
         try:
@@ -47,16 +48,25 @@ def get_api_config(force_refresh=False):
         except:
             pass
 
+    # تلاش برای استخراج خودکار
     config = extract_api_config()
-    if not config:
-        raise Exception("❌ استخراج API ناموفق")
-    config['timestamp'] = time.time()
-    try:
-        with open(cache_file, 'w') as f:
-            json.dump(config, f)
-    except:
-        pass
-    return config
+    if config:
+        config['timestamp'] = time.time()
+        try:
+            with open(cache_file, 'w') as f:
+                json.dump(config, f)
+        except:
+            pass
+        return config
+
+    # Fallback به مقادیر ثابت (آخرین test موفق)
+    print("⚠️ استخراج خودکار ناموفق – استفاده از API پیش‌فرض.")
+    fallback_config = {
+        'api_key': 'e1f31df4f6424efab5eb606004289ced',
+        'api_url': 'https://p.savenow.to/ajax/download.php',
+        'timestamp': time.time()
+    }
+    return fallback_config
 
 # ==================== دریافت لینک مستقیم دانلود ====================
 def get_download_url(api_key, api_url, youtube_url, quality='720'):
@@ -91,7 +101,7 @@ def get_download_url(api_key, api_url, youtube_url, quality='720'):
         raise Exception("progress_url یافت نشد")
 
     print(f"⏳ Polling روی {progress_url}")
-    # افزایش زمان انتظار: 30 تلاش با 2 ثانیه وقفه = حداکثر 60 ثانیه
+    # حداکثر ۶۰ ثانیه انتظار
     for attempt in range(1, 31):
         print(f"   تلاش {attempt}...")
         try:
@@ -156,7 +166,7 @@ def download_file(download_url, filename, output_dir="."):
 # ==================== روند اصلی ====================
 def download_youtube_video(youtube_url, quality="720p", output_dir="."):
     print(f"🎬 شروع دانلود: {youtube_url}")
-    # 1. تنظیمات API
+    # 1. تنظیمات API (با fallback)
     config = get_api_config()
     api_key = config['api_key']
     api_url = config['api_url']
