@@ -7,10 +7,11 @@ import html
 import tempfile
 import requests
 import os
+import base64
 from pathlib import Path
 
 # ------------------------------------------------------------
-# استخراج API از سایت downloaderto (همان کد قبلی)
+# استخراج API از سایت downloaderto
 # ------------------------------------------------------------
 EXTRACTED_API_CACHE = None
 
@@ -101,7 +102,7 @@ def get_api_config(force_refresh=False):
     }
 
 # ------------------------------------------------------------
-# توابع دریافت عنوان ویدیو (بدون تغییر)
+# دریافت عنوان ویدیو از یوتیوب
 # ------------------------------------------------------------
 def extract_youtube_video_id(url):
     patterns = [
@@ -149,128 +150,6 @@ def sanitize_title(title):
     return title
 
 # ------------------------------------------------------------
-# استخراج لینک دانلود از صفحه (تقویت شده)
-# ------------------------------------------------------------
-def extract_download_link_from_page(download_id, save_debug=True):
-    """
-    با درخواست به https://downloaderto.com/download/{id}
-    لینک نهایی دانلود را از HTML استخراج می‌کند.
-    در صورت save_debug=True، HTML را در پوشه debug_html ذخیره می‌کند.
-    """
-    page_url = f"https://downloaderto.com/download/{download_id}"
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Referer': 'https://downloaderto.com/',
-    }
-    try:
-        resp = requests.get(page_url, headers=headers, timeout=10)
-        if resp.status_code != 200:
-            print(f"   ⚠️ درخواست صفحه ناموفق: {resp.status_code}")
-            return None
-        html_content = resp.text
-
-        # ذخیره HTML برای دیباگ
-        if save_debug:
-            debug_dir = Path("debug_html")
-            debug_dir.mkdir(exist_ok=True)
-            debug_file = debug_dir / f"download_page_{download_id}.html"
-            with open(debug_file, 'w', encoding='utf-8') as f:
-                f.write(html_content)
-            print(f"   💾 HTML صفحه ذخیره شد: {debug_file}")
-
-        # الگوهای مختلف برای یافتن لینک دانلود (مرتب‌سازی شده از محتمل‌ترین)
-        patterns = [
-            # لینک‌های مستقیم mp4
-            r'href=["\'](https?://[^"\']+\.mp4)["\']',
-            r'href=["\'](https?://[^"\']+\.zip)["\']',
-            # لینک‌های حاوی download
-            r'href=["\'](https?://[^"\']+/download/[^"\']+)["\']',
-            r'data-url=["\'](https?://[^"\']+)["\']',
-            # کلیدهای رایج در JSON
-            r'downloadUrl["\']\s*:\s*["\']([^"\']+)["\']',
-            r'videoUrl["\']\s*:\s*["\']([^"\']+)["\']',
-            r'fileUrl["\']\s*:\s*["\']([^"\']+)["\']',
-            r'source["\']\s*:\s*["\']([^"\']+\.mp4)["\']',
-            # جاوااسکریپت window.location
-            r'window\.location\.href\s*=\s*["\']([^"\']+)["\']',
-            # لینک در تگ‌های a با کلاس download-btn
-            r'<a[^>]+class=["\'][^"\']*download[^"\']*["\'][^>]*href=["\']([^"\']+)["\']',
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, html_content, re.IGNORECASE)
-            if match:
-                candidate = match.group(1)
-                if candidate.startswith('http'):
-                    print(f"   ✅ لینک دانلود با الگو پیدا شد: {candidate[:80]}...")
-                    return candidate
-
-        # اگر هیچ لینکی پیدا نشد، عنوان صفحه را به عنوان fallback برمی‌گردانیم
-        title_match = re.search(r'<title>(.*?)</title>', html_content, re.IGNORECASE)
-        if title_match:
-            page_title = title_match.group(1)
-            page_title = re.sub(r'\s*[-|]\s*downloaderto\.com.*$', '', page_title, flags=re.IGNORECASE)
-            if page_title and len(page_title) > 3:
-                print(f"   ℹ️ لینکی یافت نشد، اما عنوان صفحه استخراج شد: {page_title}")
-                return page_title   # این عنوان نیست، ولی برای نام فایل بعداً استفاده می‌شود
-        return None
-    except Exception as e:
-        print(f"   ⚠️ خطا در دریافت صفحه: {e}")
-        return None
-
-# ------------------------------------------------------------
-# Polling هوشمند
-# ------------------------------------------------------------
-def wait_for_download_link(download_id, max_attempts=20, wait_time=3):
-    """
-    منتظر می‌ماند تا لینک نهایی در صفحه دانلود ظاهر شود.
-    هر wait_time ثانیه یکبار صفحه را چک می‌کند.
-    """
-    print(f"⏳ شروع هوشمند polling برای Download ID: {download_id}")
-    print(f"📊 حداکثر {max_attempts} تلاش، هر {wait_time} ثانیه")
-    
-    for attempt in range(1, max_attempts + 1):
-        print(f"\n🔄 تلاش {attempt}/{max_attempts}...")
-        download_url = extract_download_link_from_page(download_id)
-        if download_url and download_url.startswith('http'):
-            # بررسی حجم فایل
-            try:
-                head_resp = requests.head(download_url, timeout=8, allow_redirects=True)
-                size = head_resp.headers.get('content-length', 0)
-                if size and int(size) > 500 * 1024:
-                    size_str = f"{int(size)/(1024*1024):.1f} MB" if int(size) > 1024*1024 else f"{int(size)/1024:.1f} KB"
-                    print(f"✅ لینک آماده شد! حجم: {size_str}")
-                    return {
-                        'url': download_url,
-                        'size': size_str,
-                        'size_bytes': int(size),
-                        'attempts': attempt
-                    }
-                else:
-                    print(f"✅ لینک پیدا شد (حجم نامشخص یا کمتر از 500KB)")
-                    return {
-                        'url': download_url,
-                        'size': 'نامشخص',
-                        'size_bytes': 0,
-                        'attempts': attempt
-                    }
-            except Exception as e:
-                print(f"✅ لینک پیدا شد (خطا در دریافت حجم: {e})")
-                return {
-                    'url': download_url,
-                    'size': 'نامشخص',
-                    'size_bytes': 0,
-                    'attempts': attempt
-                }
-        elif download_url and not download_url.startswith('http'):
-            # ممکن است عنوان صفحه باشد – کاری نمی‌کنیم، فقط چاپ می‌کنیم
-            print(f"   ℹ️ عنوان صفحه: {download_url}")
-        time.sleep(wait_time)
-    
-    print(f"❌ پس از {max_attempts} تلاش، لینک پیدا نشد")
-    return None
-
-# ------------------------------------------------------------
 # دانلود فایل
 # ------------------------------------------------------------
 def download_file(download_url, filename, output_dir):
@@ -281,7 +160,7 @@ def download_file(download_url, filename, output_dir):
     print(f"📥 شروع دانلود: {filename}")
     resp = requests.get(download_url, headers=headers, stream=True, timeout=60)
     resp.raise_for_status()
-    filepath = output_dir / filename
+    filepath = Path(output_dir) / filename
     total = int(resp.headers.get('content-length', 0))
     with open(filepath, 'wb') as f:
         downloaded = 0
@@ -299,7 +178,7 @@ def download_file(download_url, filename, output_dir):
     }
 
 # ------------------------------------------------------------
-# فراخوانی API با fallback (برای لینک یوتیوب)
+# فراخوانی API برای دریافت download_id (برای لینک یوتیوب)
 # ------------------------------------------------------------
 def call_api_with_fallback(youtube_url, format_code, api_key, api_url_list):
     headers = {'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json', 'Referer': 'https://downloaderto.com/'}
@@ -322,43 +201,145 @@ def call_api_with_fallback(youtube_url, format_code, api_key, api_url_list):
     return None
 
 # ------------------------------------------------------------
-# دانلود مستقیم از لینک downloaderto (بدون نیاز به API)
+# تلاش برای دریافت لینک دانلود با ارسال ID به API (decode base64)
+# ------------------------------------------------------------
+def get_download_link_from_api_by_id(download_id, api_url_list, api_key):
+    headers = {'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json', 'Referer': 'https://downloaderto.com/'}
+    for api_url in api_url_list:
+        params = {'id': download_id, 'api': api_key}
+        try:
+            resp = requests.get(api_url, params=params, headers=headers, timeout=30)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get('success') and data.get('content'):
+                    try:
+                        decoded = base64.b64decode(data['content']).decode('utf-8')
+                        print("   ✅ محتوای base64 decode شد. جستجو برای لینک...")
+                        patterns = [
+                            r'https?://[^\s"\']+\.mp4',
+                            r'href=["\'](https?://[^"\']+\.mp4)',
+                            r'data-url=["\'](https?://[^"\']+)',
+                            r'downloadUrl["\']:\s*["\']([^"\']+)',
+                            r'source["\']:\s*["\']([^"\']+\.mp4)',
+                        ]
+                        for pattern in patterns:
+                            match = re.search(pattern, decoded, re.I)
+                            if match:
+                                link = match.group(1) if '(' in pattern else match.group(0)
+                                print(f"   ✅ لینک از decoded content پیدا شد: {link[:80]}...")
+                                return {'url': link, 'size': 'نامشخص', 'size_bytes': 0}
+                    except Exception as e:
+                        print(f"   ⚠️ خطا در decode base64: {e}")
+                else:
+                    # ممکن است پاسخ مستقیم لینک بدهد
+                    if 'url' in data and data['url'].startswith('http'):
+                        return {'url': data['url'], 'size': 'نامشخص', 'size_bytes': 0}
+        except Exception as e:
+            print(f"   ⚠️ خطا در API ID: {e}")
+    return None
+
+def extract_download_link_from_page(download_id, save_debug=True):
+    page_url = f"https://downloaderto.com/download/{download_id}"
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Referer': 'https://downloaderto.com/',
+    }
+    try:
+        resp = requests.get(page_url, headers=headers, timeout=10)
+        if resp.status_code != 200:
+            print(f"   ⚠️ درخواست صفحه ناموفق: {resp.status_code}")
+            return None
+        html_content = resp.text
+
+        if save_debug:
+            debug_dir = Path("debug_html")
+            debug_dir.mkdir(exist_ok=True)
+            debug_file = debug_dir / f"download_page_{download_id}.html"
+            with open(debug_file, 'w', encoding='utf-8') as f:
+                f.write(html_content)
+            print(f"   💾 HTML صفحه ذخیره شد: {debug_file}")
+
+        patterns = [
+            r'href=["\'](https?://[^"\']+\.mp4)["\']',
+            r'href=["\'](https?://[^"\']+\.zip)["\']',
+            r'href=["\'](https?://[^"\']+/download/[^"\']+)["\']',
+            r'data-url=["\'](https?://[^"\']+)["\']',
+            r'downloadUrl["\']\s*:\s*["\']([^"\']+)["\']',
+            r'videoUrl["\']\s*:\s*["\']([^"\']+)["\']',
+            r'fileUrl["\']\s*:\s*["\']([^"\']+)["\']',
+            r'source["\']\s*:\s*["\']([^"\']+\.mp4)["\']',
+            r'window\.location\.href\s*=\s*["\']([^"\']+)["\']',
+            r'<a[^>]+class=["\'][^"\']*download[^"\']*["\'][^>]*href=["\']([^"\']+)["\']',
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, html_content, re.IGNORECASE)
+            if match:
+                candidate = match.group(1)
+                if candidate.startswith('http'):
+                    print(f"   ✅ لینک دانلود با الگو پیدا شد: {candidate[:80]}...")
+                    return candidate
+        return None
+    except Exception as e:
+        print(f"   ⚠️ خطا در دریافت صفحه: {e}")
+        return None
+
+def wait_for_download_link(download_id, api_url_list, api_key, max_attempts=20, wait_time=3):
+    print(f"⏳ شروع هوشمند polling برای Download ID: {download_id}")
+    print(f"📊 حداکثر {max_attempts} تلاش، هر {wait_time} ثانیه")
+    
+    for attempt in range(1, max_attempts + 1):
+        print(f"\n🔄 تلاش {attempt}/{max_attempts}...")
+        
+        # روش 1: از طریق API با ID (base64)
+        link_info = get_download_link_from_api_by_id(download_id, api_url_list, api_key)
+        if link_info:
+            return link_info
+        
+        # روش 2: استخراج از صفحه HTML
+        download_url = extract_download_link_from_page(download_id, save_debug=(attempt==max_attempts))
+        if download_url:
+            try:
+                head_resp = requests.head(download_url, timeout=8, allow_redirects=True)
+                size = head_resp.headers.get('content-length', 0)
+                if size and int(size) > 500*1024:
+                    size_str = f"{int(size)/(1024*1024):.1f} MB" if int(size) > 1024*1024 else f"{int(size)/1024:.1f} KB"
+                    return {'url': download_url, 'size': size_str, 'size_bytes': int(size)}
+                else:
+                    return {'url': download_url, 'size': 'نامشخص', 'size_bytes': 0}
+            except:
+                return {'url': download_url, 'size': 'نامشخص', 'size_bytes': 0}
+        time.sleep(wait_time)
+    return None
+
+# ------------------------------------------------------------
+# دانلود مستقیم از لینک downloaderto (برای تست)
 # ------------------------------------------------------------
 def download_from_direct_link(direct_url, output_dir):
-    """
-    دریافت لینک مانند https://downloaderto.com/download/xyz
-    و دانلود ویدیو با polling هوشمند
-    """
     match = re.search(r'/download/([A-Za-z0-9]+)', direct_url)
     if not match:
         raise Exception("لینک دانلود معتبر نیست (عدم وجود ID)")
     download_id = match.group(1)
     print(f"🔍 استخراج Download ID: {download_id}")
-
-    # تلاش برای دریافت عنوان از صفحه (برای نام فایل)
-    page_content = extract_download_link_from_page(download_id, save_debug=True)
-    video_title = None
-    if page_content and not page_content.startswith('http'):
-        # در این حالت page_content ممکن است عنوان صفحه باشد
-        video_title = sanitize_title(page_content)
-    if not video_title:
-        video_title = f"video_{download_id}"
-    print(f"🎬 عنوان ویدیو (پیش‌فرض): {video_title}")
-
-    # منتظر لینک نهایی
-    link_info = wait_for_download_link(download_id, max_attempts=20, wait_time=3)
+    video_title = f"video_{download_id}"
+    
+    # برای این حالت، از API key و URL list استفاده می‌کنیم
+    api_config = get_api_config()
+    api_key = api_config['api_key']
+    api_url_list = [
+        'https://p.lbserver.xyz/ajax/download.php',
+        'https://p.savenow.to/ajax/download.php',
+    ]
+    
+    link_info = wait_for_download_link(download_id, api_url_list, api_key, max_attempts=20)
     if not link_info:
-        manual_url = f"https://downloaderto.com/download/{download_id}"
-        raise Exception(f"زمان انتظار تمام شد. لینک دستی: {manual_url}")
-
-    # دانلود
-    safe_title = re.sub(r'[<>:"/\\|?*]', '_', video_title)
+        raise Exception(f"زمان انتظار تمام شد. لینک دستی: {direct_url}")
+    
+    safe_title = sanitize_title(video_title)
     filename = f"{safe_title}_direct.mp4"
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     result = download_file(link_info['url'], filename, output_path)
-    if not result['success']:
-        raise Exception("دانلود ناموفق")
     return result['filepath'], video_title
 
 # ------------------------------------------------------------
@@ -370,7 +351,6 @@ def download_youtube_video(youtube_url, quality, output_dir):
         print("🔗 لینک از نوع downloaderto.com تشخیص داده شد. دانلود مستقیم...")
         return download_from_direct_link(youtube_url, output_dir)
 
-    # در غیر این صورت، لینک یوتیوب
     quality_map = {"360p": "360", "480p": "480", "720p": "720", "1080p": "1080", "بهترین": "best"}
     format_code = quality_map.get(quality, "720")
 
@@ -386,17 +366,16 @@ def download_youtube_video(youtube_url, quality, output_dir):
 
     print(f"🔑 API Key: {api_key[:16]}...")
     video_title = get_video_title(youtube_url)
-    safe_title = re.sub(r'[<>:"/\\|?*]', '_', video_title)
+    safe_title = sanitize_title(video_title)
     filename = f"{safe_title}_{quality}.mp4"
 
     data = call_api_with_fallback(youtube_url, format_code, api_key, api_url_list)
     if not data:
-        raise Exception("تمامی API endpoint‌ها پاسخگو نبودند. لطفاً بعداً تلاش کنید.")
-
+        raise Exception("تمامی API endpoint‌ها پاسخگو نبودند.")
     download_id = data.get('id')
     print(f"✅ Download ID از API: {download_id}")
 
-    link_info = wait_for_download_link(download_id, max_attempts=20, wait_time=3)
+    link_info = wait_for_download_link(download_id, api_url_list, api_key, max_attempts=20, wait_time=3)
     if not link_info:
         manual_url = f"https://downloaderto.com/download/{download_id}"
         text_file = Path(output_dir) / "download_link.txt"
@@ -412,7 +391,7 @@ def download_youtube_video(youtube_url, quality, output_dir):
     return result['filepath'], video_title
 
 # ------------------------------------------------------------
-# اجرای خط فرمان و خروجی برای GitHub Actions
+# اجرای خط فرمان
 # ------------------------------------------------------------
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="دانلود از یوتیوب یا لینک مستقیم downloaderto")
@@ -426,21 +405,15 @@ if __name__ == "__main__":
 
     try:
         file_path, title = download_youtube_video(args.url, args.quality, out_dir)
-        # خروجی برای GitHub Actions (از GITHUB_OUTPUT استفاده می‌کند)
         github_output = os.getenv("GITHUB_OUTPUT")
         if github_output:
             with open(github_output, "a") as f:
                 f.write(f"video_file={file_path}\n")
                 f.write(f"video_title={title}\n")
         else:
-            # حالت محلی
             print(f"::set-output name=video_file::{file_path}")
             print(f"::set-output name=video_title::{title}")
         print(f"✅ موفق: {file_path}")
     except Exception as e:
         print(f"❌ خطا: {e}")
-        # در صورت وجود فایل لینک دستی، آن را نمایش می‌دهیم
-        link_file = out_dir / "download_link.txt"
-        if link_file.exists():
-            print(f"📄 لینک دستی در فایل {link_file} ذخیره شده است.")
         exit(1)
