@@ -10,9 +10,14 @@ import os
 from pathlib import Path
 
 # ------------------------------------------------------------
-# استخراج API از سایت downloaderto (همان کد اصلی شما)
+# استخراج API از سایت downloaderto (با چندین آدرس پیش‌فرض)
 # ------------------------------------------------------------
+EXTRACTED_API_CACHE = None
+
 def extract_api_config_from_website():
+    global EXTRACTED_API_CACHE
+    if EXTRACTED_API_CACHE:
+        return EXTRACTED_API_CACHE
     try:
         site_url = "https://downloaderto.com/enHF/"
         headers = {
@@ -59,48 +64,20 @@ def extract_api_config_from_website():
             if api_url:
                 break
 
-        # جستجو در فایل‌های JavaScript
-        if not api_key or not api_url:
-            js_files = re.findall(r'<script[^>]*src=["\']([^"\']+\.js[^"\']*)["\']', html_content)
-            for js_file in js_files[:5]:
-                try:
-                    if not js_file.startswith('http'):
-                        js_url = "https://downloaderto.com" + (js_file if js_file.startswith('/') else '/'+js_file)
-                    else:
-                        js_url = js_file
-                    js_resp = requests.get(js_url, headers=headers, timeout=10)
-                    if js_resp.status_code == 200:
-                        js_content = js_resp.text
-                        if not api_key:
-                            for pattern in api_key_patterns:
-                                matches = re.findall(pattern, js_content, re.IGNORECASE)
-                                for match in matches:
-                                    if len(match) == 32 and all(c in '0123456789abcdef' for c in match):
-                                        api_key = match
-                                        break
-                                if api_key:
-                                    break
-                        if not api_url:
-                            for pattern in api_url_patterns:
-                                matches = re.findall(pattern, js_content, re.IGNORECASE)
-                                for match in matches:
-                                    if 'download' in match.lower() and match.startswith('http'):
-                                        api_url = match
-                                        break
-                                if api_url:
-                                    break
-                    if api_key and api_url:
-                        break
-                except:
-                    continue
-
         if api_key and api_url:
-            return {'api_key': api_key, 'api_url': api_url, 'timestamp': time.time()}
+            EXTRACTED_API_CACHE = {'api_key': api_key, 'api_url': api_url, 'timestamp': time.time()}
+            return EXTRACTED_API_CACHE
         return None
     except Exception:
         return None
 
 def get_api_config(force_refresh=False):
+    # لیست fallback آدرس‌های API (در صورت عدم استخراج یا خطا)
+    fallback_apis = [
+        'https://p.lbserver.xyz/ajax/download.php',
+        'https://p.savenow.to/ajax/download.php',
+        'https://api.downloaderto.com/ajax/download.php',
+    ]
     cache_file = Path(tempfile.gettempdir()) / "downloaderto_api_cache.json"
     if not force_refresh and cache_file.exists():
         try:
@@ -111,22 +88,26 @@ def get_api_config(force_refresh=False):
         except:
             pass
     config = extract_api_config_from_website()
-    if config:
+    if config and config.get('api_url'):
+        # اگر آدرس استخراج شده در لیست fallback نبود، آن را اول قرار بده
+        if config['api_url'] not in fallback_apis:
+            fallback_apis.insert(0, config['api_url'])
+        config['api_url'] = fallback_apis[0]  # اولویت با آدرس استخراج شده
         try:
             with open(cache_file, 'w') as f:
                 json.dump(config, f)
         except:
             pass
         return config
-    # fallback پیش‌فرض (از کد شما)
+    # برگرداندن اولین fallback
     return {
         'api_key': '2e716c3914a4f931fdad91ad9e14c6b1',
-        'api_url': 'https://p.lbserver.xyz/ajax/download.php',
+        'api_url': fallback_apis[0],
         'timestamp': time.time()
     }
 
 # ------------------------------------------------------------
-# دریافت عنوان ویدیو
+# دریافت عنوان ویدیو (بدون تغییر)
 # ------------------------------------------------------------
 def extract_youtube_video_id(url):
     patterns = [
@@ -174,14 +155,14 @@ def sanitize_title(title):
     return title
 
 # ------------------------------------------------------------
-# Polling با تنظیمات بهبود یافته (تعداد بیشتر، لینک جدید)
+# Polling با پشتیبانی از چندین لینک
 # ------------------------------------------------------------
 def wait_for_download_link(download_id, max_attempts=40, wait_time=3):
     possible_urls = [
         f"https://p.savenow.to/download/{download_id}",
         f"https://p.savenow.to/api/download/{download_id}",
         f"https://p.lbserver.xyz/download/{download_id}",
-        f"https://downloaderto.com/download/{download_id}",  # لینک جدید اضافه شد
+        f"https://downloaderto.com/download/{download_id}",
     ]
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -246,32 +227,59 @@ def download_file(download_url, filename, output_dir):
     }
 
 # ------------------------------------------------------------
-# تابع اصلی دانلود
+# تابع اصلی با پشتیبانی از چندین API endpoint (fallback)
 # ------------------------------------------------------------
+def call_api_with_fallback(youtube_url, format_code, api_key, api_url_list):
+    """تلاش برای فراخوانی API با لیستی از آدرس‌ها"""
+    headers = {'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json', 'Referer': 'https://downloaderto.com/'}
+    for api_url in api_url_list:
+        params = {'copyright': '0', 'format': format_code, 'url': youtube_url, 'api': api_key}
+        try:
+            print(f"🌐 تلاش به آدرس: {api_url}")
+            resp = requests.get(api_url, params=params, headers=headers, timeout=30)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get('success'):
+                    return data
+                else:
+                    print(f"⚠️ API {api_url} خطا: {data.get('error', 'نامشخص')}")
+            else:
+                print(f"⚠️ API {api_url} پاسخ نامعتبر: {resp.status_code}")
+        except Exception as e:
+            print(f"⚠️ خطا در ارتباط با {api_url}: {str(e)[:50]}")
+            continue
+    return None
+
 def download_youtube_video(youtube_url, quality, output_dir):
     quality_map = {"360p": "360", "480p": "480", "720p": "720", "1080p": "1080", "بهترین": "best"}
     format_code = quality_map.get(quality, "720")
 
+    # دریافت کلید API (بدون آدرس خاص)
     api_config = get_api_config(force_refresh=False)
     api_key = api_config['api_key']
-    api_url = api_config['api_url']
-    print(f"🔑 API Key: {api_key[:16]}...")
-    print(f"🌐 API URL: {api_url}")
+    # لیست آدرس‌های API برای fallback
+    api_url_list = [
+        'https://p.lbserver.xyz/ajax/download.php',
+        'https://p.savenow.to/ajax/download.php',
+        'https://api.downloaderto.com/ajax/download.php',
+    ]
+    # اگر آدرسی از سایت استخراج شده و در لیست نیست، اول اضافه کن
+    extracted_url = api_config.get('api_url')
+    if extracted_url and extracted_url not in api_url_list:
+        api_url_list.insert(0, extracted_url)
 
+    print(f"🔑 API Key: {api_key[:16]}...")
+    
     # عنوان ویدیو
     video_title = get_video_title(youtube_url)
     safe_title = re.sub(r'[<>:"/\\|?*]', '_', video_title)
     filename = f"{safe_title}_{quality}.mp4"
 
-    # درخواست به API
-    params = {'copyright': '0', 'format': format_code, 'url': youtube_url, 'api': api_key}
-    headers = {'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json', 'Referer': 'https://downloaderto.com/'}
-    resp = requests.get(api_url, params=params, headers=headers, timeout=30)
-    if resp.status_code != 200:
-        raise Exception(f"API خطا: {resp.status_code}")
-    data = resp.json()
-    if not data.get('success'):
-        raise Exception(f"API خطا: {data.get('error', 'نامشخص')}")
+    # فراخوانی API با fallback
+    data = call_api_with_fallback(youtube_url, format_code, api_key, api_url_list)
+    if not data:
+        raise Exception("تمامی API endpoint‌ها پاسخگو نبودند. لطفاً بعداً تلاش کنید.")
+    
     download_id = data.get('id')
     print(f"✅ Download ID: {download_id}")
 
@@ -304,14 +312,12 @@ if __name__ == "__main__":
 
     try:
         file_path, title = download_youtube_video(args.url, args.quality, out_dir)
-        # خروجی برای GitHub Actions
         github_output = os.getenv("GITHUB_OUTPUT")
         if github_output:
             with open(github_output, "a") as f:
                 f.write(f"video_file={file_path}\n")
                 f.write(f"video_title={title}\n")
         else:
-            # Fallback برای اجرای محلی
             print(f"::set-output name=video_file::{file_path}")
             print(f"::set-output name=video_title::{title}")
         print(f"✅ موفق: {file_path}")
