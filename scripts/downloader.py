@@ -6,10 +6,11 @@ import re
 import html
 import tempfile
 import requests
+import os
 from pathlib import Path
 
 # ------------------------------------------------------------
-# استخراج API از سایت (دقیقاً همان کد شما)
+# استخراج API از سایت downloaderto (همان کد اصلی شما)
 # ------------------------------------------------------------
 def extract_api_config_from_website():
     try:
@@ -58,7 +59,7 @@ def extract_api_config_from_website():
             if api_url:
                 break
 
-        # اگر پیدا نشد، در فایل‌های JS جستجو کن
+        # جستجو در فایل‌های JavaScript
         if not api_key or not api_url:
             js_files = re.findall(r'<script[^>]*src=["\']([^"\']+\.js[^"\']*)["\']', html_content)
             for js_file in js_files[:5]:
@@ -117,7 +118,7 @@ def get_api_config(force_refresh=False):
         except:
             pass
         return config
-    # fallback
+    # fallback پیش‌فرض (از کد شما)
     return {
         'api_key': '2e716c3914a4f931fdad91ad9e14c6b1',
         'api_url': 'https://p.lbserver.xyz/ajax/download.php',
@@ -125,7 +126,7 @@ def get_api_config(force_refresh=False):
     }
 
 # ------------------------------------------------------------
-# دریافت عنوان ویدیو (همان کد شما)
+# دریافت عنوان ویدیو
 # ------------------------------------------------------------
 def extract_youtube_video_id(url):
     patterns = [
@@ -173,39 +174,58 @@ def sanitize_title(title):
     return title
 
 # ------------------------------------------------------------
-# Polling و دانلود (همان کد شما)
+# Polling با تنظیمات بهبود یافته (تعداد بیشتر، لینک جدید)
 # ------------------------------------------------------------
-def wait_for_download_link(download_id, max_attempts=25, wait_time=2):
+def wait_for_download_link(download_id, max_attempts=40, wait_time=3):
     possible_urls = [
         f"https://p.savenow.to/download/{download_id}",
         f"https://p.savenow.to/api/download/{download_id}",
         f"https://p.lbserver.xyz/download/{download_id}",
+        f"https://downloaderto.com/download/{download_id}",  # لینک جدید اضافه شد
     ]
     headers = {
-        'User-Agent': 'Mozilla/5.0',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Accept': 'video/mp4,video/*,*/*;q=0.8',
         'Referer': 'https://downloaderto.com/',
     }
-    for attempt in range(1, max_attempts+1):
+    print(f"⏳ شروع polling برای Download ID: {download_id}")
+    print(f"📊 حداکثر {max_attempts} تلاش، هر {wait_time} ثانیه یک بار")
+    
+    for attempt in range(1, max_attempts + 1):
+        print(f"\n🔄 تلاش {attempt}/{max_attempts}...")
         for url in possible_urls:
             try:
                 resp = requests.head(url, headers=headers, timeout=8, allow_redirects=True)
-                if resp.status_code in [200,302,307]:
+                print(f"   🔍 بررسی {url} => وضعیت {resp.status_code}")
+                if resp.status_code in [200, 302, 307]:
                     final_url = resp.url if resp.history else url
                     size = resp.headers.get('content-length', 0)
-                    if size and int(size) > 500*1024:
-                        size_str = f"{int(size)/(1024*1024):.1f} MB" if int(size) > 1024*1024 else f"{int(size)/1024:.1f} KB"
-                        return {'url': final_url, 'size': size_str, 'size_bytes': int(size)}
-            except:
+                    if size and int(size) > 500 * 1024:
+                        if int(size) < 1024*1024:
+                            size_str = f"{int(size)/1024:.1f} KB"
+                        else:
+                            size_str = f"{int(size)/(1024*1024):.1f} MB"
+                        print(f"✅ لینک آماده شد! حجم: {size_str}")
+                        return {
+                            'url': final_url,
+                            'size': size_str,
+                            'size_bytes': int(size),
+                            'attempts': attempt
+                        }
+            except Exception as e:
+                print(f"   ⚠️ خطا در بررسی {url}: {str(e)[:50]}")
                 continue
         time.sleep(wait_time)
+    
+    print(f"❌ پس از {max_attempts} تلاش، لینک پیدا نشد")
     return None
 
 def download_file(download_url, filename, output_dir):
     headers = {
-        'User-Agent': 'Mozilla/5.0',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Referer': 'https://downloaderto.com/',
     }
+    print(f"📥 شروع دانلود: {filename}")
     resp = requests.get(download_url, headers=headers, stream=True, timeout=60)
     resp.raise_for_status()
     filepath = output_dir / filename
@@ -219,26 +239,32 @@ def download_file(download_url, filename, output_dir):
                 print(f"\r📥 {downloaded/total*100:.1f}%", end='')
     print()
     size_mb = filepath.stat().st_size / (1024*1024)
-    return {'success': True, 'filepath': str(filepath), 'size': f"{size_mb:.1f} MB"}
+    return {
+        'success': True,
+        'filepath': str(filepath),
+        'size': f"{size_mb:.1f} MB"
+    }
 
 # ------------------------------------------------------------
-# تابع اصلی (همان منطق دانلود شما)
+# تابع اصلی دانلود
 # ------------------------------------------------------------
 def download_youtube_video(youtube_url, quality, output_dir):
-    quality_map = {"360p":"360", "480p":"480", "720p":"720", "1080p":"1080", "بهترین":"best"}
+    quality_map = {"360p": "360", "480p": "480", "720p": "720", "1080p": "1080", "بهترین": "best"}
     format_code = quality_map.get(quality, "720")
 
     api_config = get_api_config(force_refresh=False)
     api_key = api_config['api_key']
     api_url = api_config['api_url']
+    print(f"🔑 API Key: {api_key[:16]}...")
+    print(f"🌐 API URL: {api_url}")
 
-    # دریافت عنوان
+    # عنوان ویدیو
     video_title = get_video_title(youtube_url)
     safe_title = re.sub(r'[<>:"/\\|?*]', '_', video_title)
     filename = f"{safe_title}_{quality}.mp4"
 
     # درخواست به API
-    params = {'copyright':'0', 'format':format_code, 'url':youtube_url, 'api':api_key}
+    params = {'copyright': '0', 'format': format_code, 'url': youtube_url, 'api': api_key}
     headers = {'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json', 'Referer': 'https://downloaderto.com/'}
     resp = requests.get(api_url, params=params, headers=headers, timeout=30)
     if resp.status_code != 200:
@@ -249,12 +275,13 @@ def download_youtube_video(youtube_url, quality, output_dir):
     download_id = data.get('id')
     print(f"✅ Download ID: {download_id}")
 
-    # Polling
-    link_info = wait_for_download_link(download_id)
+    # Polling برای دریافت لینک دانلود
+    link_info = wait_for_download_link(download_id, max_attempts=40, wait_time=3)
     if not link_info:
-        raise Exception("زمان انتظار برای لینک دانلود تمام شد")
+        manual_url = f"https://downloaderto.com/download/{download_id}"
+        raise Exception(f"زمان انتظار تمام شد. لطفاً ویدیو را به صورت دستی از این لینک دانلود کنید: {manual_url}")
 
-    # دانلود
+    # دانلود فایل
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     result = download_file(link_info['url'], filename, output_path)
@@ -272,15 +299,21 @@ if __name__ == "__main__":
     parser.add_argument("--output-dir", default=".")
     args = parser.parse_args()
 
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = Path(args.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        file_path, title = download_youtube_video(args.url, args.quality, output_dir)
+        file_path, title = download_youtube_video(args.url, args.quality, out_dir)
         # خروجی برای GitHub Actions
-        with open(os.environ.get("GITHUB_OUTPUT", "/dev/null"), "a") as f:
-            f.write(f"video_file={file_path}\n")
-            f.write(f"video_title={title}\n")
+        github_output = os.getenv("GITHUB_OUTPUT")
+        if github_output:
+            with open(github_output, "a") as f:
+                f.write(f"video_file={file_path}\n")
+                f.write(f"video_title={title}\n")
+        else:
+            # Fallback برای اجرای محلی
+            print(f"::set-output name=video_file::{file_path}")
+            print(f"::set-output name=video_title::{title}")
         print(f"✅ موفق: {file_path}")
     except Exception as e:
         print(f"❌ خطا: {e}")
