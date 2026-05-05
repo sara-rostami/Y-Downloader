@@ -1,0 +1,97 @@
+name: YouTube Downloader
+
+on:
+  workflow_dispatch:
+    inputs:
+      youtube_url:
+        description: 'لینک ویدیوی YouTube'
+        required: true
+        type: string
+      quality:
+        description: 'کیفیت ویدیو'
+        required: false
+        default: '720p'
+        type: choice
+        options:
+          - 360p
+          - 480p
+          - 720p
+          - 1080p
+          - best
+      retention_minutes:
+        description: 'چند دقیقه فایل روی GitHub بماند؟ (حداقل 1 دقیقه)'
+        required: false
+        default: '30'
+        type: string
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run downloader script
+        id: downloader
+        run: |
+          python scripts/youtube_downloader.py \
+            --url "${{ github.event.inputs.youtube_url }}" \
+            --quality "${{ github.event.inputs.quality }}" \
+            --output-dir ./downloaded_video
+
+      - name: Upload video as artifact
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: youtube-video
+          path: downloaded_video/*.mp4
+          # نگهداری حداقل یک روز (برای اطمینان از حذف زودتر بعداً توسط API حذف می‌شود)
+          retention-days: 1
+
+      - name: Get artifact download URL
+        id: artifact_url
+        run: |
+          ARTIFACT_ID="${{ steps.upload.outputs.artifact-id }}"
+          RUN_ID="${{ github.run_id }}"
+          REPO="${{ github.repository }}"
+          DOWNLOAD_URL="https://github.com/${REPO}/actions/runs/${RUN_ID}/artifacts/${ARTIFACT_ID}"
+          echo "download_url=${DOWNLOAD_URL}" >> $GITHUB_OUTPUT
+          echo "✅ لینک دانلود (معتبر تا زمان حذف):"
+          echo "${DOWNLOAD_URL}"
+
+      - name: Display download link and video info
+        run: |
+          echo "=========================================="
+          echo "🎬 عنوان ویدیو: ${{ steps.downloader.outputs.video_title }}"
+          echo "💾 کیفیت: ${{ github.event.inputs.quality }}"
+          echo "🔗 لینک دانلود از GitHub:"
+          echo "${{ steps.artifact_url.outputs.download_url }}"
+          echo "⏳ این فایل بعد از ${{ github.event.inputs.retention_minutes }} دقیقه به طور خودکار حذف خواهد شد."
+          echo "=========================================="
+
+      - name: Schedule automatic deletion
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+          RETENTION_MINUTES: ${{ github.event.inputs.retention_minutes }}
+          REPO: ${{ github.repository }}
+        run: |
+          # منتظر می‌مانیم به مدت retention_minutes دقیقه
+          sleep $(( ${RETENTION_MINUTES} * 60 ))
+          echo "⏰ زمان نگهداری تمام شد. حذف artifact..."
+          # حذف artifact از طریق GitHub API
+          curl -L -X DELETE \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${REPO}/actions/artifacts/${ARTIFACT_ID}"
+          echo "✅ Artifact حذف شد. لینک دانلود دیگر کار نمی‌کند."
