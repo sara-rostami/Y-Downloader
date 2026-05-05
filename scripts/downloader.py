@@ -153,28 +153,24 @@ def extract_download_link_from_page(download_id):
         'Referer': 'https://downloaderto.com/',
     }
     try:
+        # دریافت محتوای صفحه
         resp = requests.get(page_url, headers=headers, timeout=10)
         if resp.status_code != 200:
+            print(f"   ⚠️ دریافت صفحه ناموفق: {resp.status_code}")
             return None
         html_content = resp.text
-        # جستجو برای لینک دانلود
-        patterns = [
-            r'href=["\'](https?://[^"\']+\.mp4)["\']',
-            r'href=["\'](https?://[^"\']+\.zip)["\']',
-            r'href=["\'](https?://[^"\']+/download/[^"\']+)["\']',
-            r'data-url=["\'](https?://[^"\']+)["\']',
-            r'downloadUrl["\']\s*:\s*["\']([^"\']+)["\']',
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, html_content, re.IGNORECASE)
-            if match:
-                return match.group(1)
-        # همچنین عنوان ویدیو را استخراج کنیم (برای نام فایل)
-        title_match = re.search(r'<title>(.*?)</title>', html_content, re.IGNORECASE)
-        if title_match:
-            title = title_match.group(1)
-            title = re.sub(r' - downloaderto\.com.*$', '', title, flags=re.IGNORECASE)
-            return title if title.strip() else None
+        
+        # !!! ذخیره HTML برای بررسی دقیق !!!
+        output_dir = Path("debug_html")
+        output_dir.mkdir(exist_ok=True)
+        debug_file = output_dir / f"download_page_{download_id}.html"
+        with open(debug_file, 'w', encoding='utf-8') as f:
+            f.write(html_content)
+        print(f"💾 HTML صفحه در {debug_file} ذخیره شد.")
+
+        # جستجو برای لینک دانلود با RegEx های بهبود یافته
+        # بخش قبلی رو حذف کنید و با الگوهای جدید جایگزین کنید...
+        # در ادامه لینک‌های احتمالی را بررسی خواهیم کرد...
     except Exception as e:
         print(f"   ⚠️ خطا در دریافت صفحه: {e}")
     return None
