@@ -21,7 +21,7 @@ on:
       retention_minutes:
         description: 'چند دقیقه فایل بماند؟ (حداقل 1)'
         required: false
-        default: '30'
+        default: '5'
         type: string
 
 jobs:
@@ -31,13 +31,23 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install yt-dlp and ffmpeg
+      # ------------------- تنظیم OAuth برای yt-dlp -------------------
+      - name: Setup yt-dlp OAuth
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
-          pip install yt-dlp
+          mkdir -p ~/.config/yt-dlp
+          # فعال کردن --netrc در config
+          echo "--netrc" >> ~/.config/yt-dlp/config
+          # ایجاد فایل netrc با حساب OAuth
+          cat > ~/.netrc << EOF
+          machine youtube login oauth password ""
+          EOF
+          chmod 600 ~/.netrc
+          echo "✅ OAuth setup complete. First run will require device code authorization."
 
-      - name: Download video
+      - name: Install yt-dlp
+        run: pip install yt-dlp
+
+      - name: Download video with OAuth
         id: downloader
         run: |
           python scripts/download.py \
