@@ -1,0 +1,21 @@
+name: تست API دانلودرتو
+
+on: [push, workflow_dispatch]   # با هر push یا دستی اجرا می‌شود
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: دریافت کد
+        uses: actions/checkout@v4
+
+      - name: نصب پایتون
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: نصب کتابخانه‌ها
+        run: pip install requests
+
+      - name: اجرای تست کامل
+        run: python test_api.py
